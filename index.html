@@ -753,7 +753,7 @@ function renderAnalyzeFor(id) {
         } else if (seg.fromRow) {
           where = `Försening uppstod någonstans mellan ${seg.fromRow.p.type} (${seg.fromRow.p.label}) och ${seg.toRow.p.type} (${seg.toRow.p.label})`;
           const carriers = [...new Set([fromCarrier, ...seg.missingRows.map(r => carrierName(r.p.carrierId)), toCarrier].filter(Boolean))];
-          ansvar = carriers.length ? `Möjliga ansvariga utförare: ${carriers.join(', ')}` : '';
+          ansvar = carriers.length ? `Ansvarig${carriers.length>1?'a':''} utförare: ${carriers.join(', ')}` : '';
         } else {
           where = `Försening uppstod före ${seg.toRow.p.type} (${seg.toRow.p.label})`;
           ansvar = toCarrier ? `Ansvarig utförare: ${toCarrier}` : '';
