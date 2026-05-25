@@ -743,7 +743,8 @@ function renderAnalyzeFor(id) {
       if (Math.abs(addedMin) <= 15) {
         html += `<li>🟢 ${fromTxt} → ${toTxt}: ingen ny försening tillkom (${formatDelta(addedMin)}). Förseningen propagerades bara vidare.</li>`;
       } else if (addedMin > 15) {
-        html += `<li>🔴 ${fromTxt} → ${toTxt}: <strong>+${formatDelta(addedMin).replace('+','')} extra försening tillkom här</strong>${missingTxt}</li>`;
+        const human = formatDaysHoursMin(addedMin);
+        html += `<li>🔴 ${fromTxt} → ${toTxt}: <strong>+${formatDelta(addedMin).replace('+','')} extra försening tillkom här</strong> <button class="secondary copy-btn" data-copy="${esc(human)}" style="width:auto; padding:2px 8px; font-size:12px; margin-left:6px;">📋 ${esc(human)}</button>${missingTxt}</li>`;
       } else {
         html += `<li>🟡 ${fromTxt} → ${toTxt}: tid återhämtades (${formatDelta(addedMin)})${missingTxt}</li>`;
       }
@@ -758,8 +759,10 @@ function renderAnalyzeFor(id) {
       const propagatedMin = Math.round(firstDelayMs / 60000);
       const finalMin = Math.round(lastDelayMs / 60000);
       const extraMin = finalMin - propagatedMin;
+      const finalHuman = formatDaysHoursMin(finalMin);
+      const copyBtn = finalMin > 15 ? ` <button class="secondary copy-btn" data-copy="${esc(finalHuman)}" style="width:auto; padding:2px 8px; font-size:12px; margin-left:6px;">📋 ${esc(finalHuman)}</button>` : '';
       html += `<li style="margin-top:8px; list-style:none; border-top:1px solid var(--border); padding-top:8px;">
-        <strong>Totalt sett:</strong> Första kända försening var ${formatDelta(propagatedMin)} vid ${esc(firstDelayedRow.p.type)}. Vid sista skanningen (${esc(lastRow.p.type)}) är förseningen ${formatDelta(finalMin)}.
+        <strong>Totalt sett:</strong> Första kända försening var ${formatDelta(propagatedMin)} vid ${esc(firstDelayedRow.p.type)}. Vid sista skanningen (${esc(lastRow.p.type)}) är förseningen ${formatDelta(finalMin)}.${copyBtn}
         ${Math.abs(extraMin) <= 15
           ? ' Inget tyder på ytterligare försening – den initiala förseningen propagerades bara.'
           : extraMin > 15
@@ -772,6 +775,15 @@ function renderAnalyzeFor(id) {
   }
 
   out.innerHTML = html;
+
+  out.querySelectorAll('.copy-btn').forEach(btn => btn.onclick = () => {
+    const txt = btn.dataset.copy;
+    navigator.clipboard.writeText(txt).then(() => {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '✓ kopierat';
+      setTimeout(() => { btn.innerHTML = orig; }, 1200);
+    });
+  });
 
   out.querySelectorAll('[data-scan]').forEach(inp => inp.onchange = () => {
     const key = inp.dataset.scan;
@@ -803,6 +815,20 @@ function formatDelta(min) {
   if (a < 60) return `${sign}${a} min`;
   const h = Math.floor(a/60), m = a%60;
   return `${sign}${h}h ${m}min`;
+}
+function formatDaysHoursMin(min) {
+  const sign = min < 0 ? '-' : '';
+  let a = Math.abs(min);
+  const days = Math.floor(a / (24*60));
+  a -= days * 24 * 60;
+  const hours = Math.floor(a / 60);
+  const mins = a % 60;
+  const parts = [];
+  if (days) parts.push(`${days} ${days===1?'dag':'dagar'}`);
+  if (hours) parts.push(`${hours}h`);
+  if (mins) parts.push(`${mins} min`);
+  if (parts.length === 0) return '0 min';
+  return sign + parts.join(', ');
 }
 function formatDeltaDays(d) {
   if (d === 0) return 'samma dag';
