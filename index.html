@@ -744,20 +744,22 @@ function renderAnalyzeFor(id) {
         html += `<li>🟢 ${fromTxt} → ${toTxt}: ingen ny försening tillkom (${formatDelta(addedMin)}). Förseningen propagerades bara vidare.</li>`;
       } else if (addedMin > 15) {
         const human = formatDaysHoursMin(addedMin);
-        const fromCarrier = seg.fromRow ? carrierName(seg.fromRow.p.carrierId) : '';
-        const toCarrier = carrierName(seg.toRow.p.carrierId);
-        let where, ansvar;
+        const allCarriers = [...new Set([
+          seg.fromRow ? carrierName(seg.fromRow.p.carrierId) : '',
+          ...seg.missingRows.map(r => carrierName(r.p.carrierId)),
+          carrierName(seg.toRow.p.carrierId),
+        ].filter(Boolean))];
+        let where;
         if (seg.missingRows.length === 0) {
-          where = `Försening uppstod vid ${seg.toRow.p.type} – ${seg.toRow.p.label}`;
-          ansvar = toCarrier ? `Ansvarig utförare: ${toCarrier}` : '';
+          where = seg.fromRow
+            ? `Försening uppstod mellan ${seg.fromRow.p.type} (${seg.fromRow.p.label}) och ${seg.toRow.p.type} (${seg.toRow.p.label})`
+            : `Försening uppstod vid ${seg.toRow.p.type} – ${seg.toRow.p.label}`;
         } else if (seg.fromRow) {
           where = `Försening uppstod någonstans mellan ${seg.fromRow.p.type} (${seg.fromRow.p.label}) och ${seg.toRow.p.type} (${seg.toRow.p.label})`;
-          const carriers = [...new Set([fromCarrier, ...seg.missingRows.map(r => carrierName(r.p.carrierId)), toCarrier].filter(Boolean))];
-          ansvar = carriers.length ? `Ansvarig${carriers.length>1?'a':''} utförare: ${carriers.join(', ')}` : '';
         } else {
           where = `Försening uppstod före ${seg.toRow.p.type} (${seg.toRow.p.label})`;
-          ansvar = toCarrier ? `Ansvarig utförare: ${toCarrier}` : '';
         }
+        const ansvar = allCarriers.length ? `Ansvarig${allCarriers.length>1?'a':''} utförare: ${allCarriers.join(', ')}` : '';
         const tider = `Planerad: ${fmtPlanned(seg.toRow.p)} – Faktisk: ${fmtActual(seg.toRow)}`;
         const copyTxt = [human, where, tider, ansvar].filter(Boolean).join(' – ');
         delayItems.push({ min: addedMin, text: copyTxt });
