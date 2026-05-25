@@ -59,7 +59,8 @@
 <header>
   <h1>🚚 Transportförsening</h1>
   <nav>
-    <button data-tab="lines" class="active">Linjer</button>
+    <button data-tab="carriers" class="active">Utförare</button>
+    <button data-tab="lines">Linjer</button>
     <button data-tab="transports">Transporter</button>
     <button data-tab="analyze">Analys</button>
   </nav>
@@ -72,14 +73,37 @@
 
 <main>
 
+<!-- ============ UTFÖRARE ============ -->
+<section id="tab-carriers" class="active">
+  <h2>Utförare</h2>
+  <div class="card">
+    <h3 id="carrierFormTitle">Ny utförare</h3>
+    <div class="row">
+      <div><label>Namn</label><input id="carrierName" placeholder="t.ex. DHL"></div>
+      <div><label>Kommentar</label><input id="carrierNote" placeholder="valfritt"></div>
+    </div>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button id="saveCarrierBtn">Spara utförare</button>
+      <button class="secondary" id="cancelCarrierBtn" style="display:none">Avbryt</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Sparade utförare</h3>
+    <table id="carriersTable">
+      <thead><tr><th>Namn</th><th>Kommentar</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
 <!-- ============ LINJER ============ -->
-<section id="tab-lines" class="active">
+<section id="tab-lines">
   <h2>Linjeregister</h2>
   <div class="card">
     <h3 id="lineFormTitle">Ny linje</h3>
     <div class="row">
       <div><label>Namn / linjenr</label><input id="lineName" placeholder="t.ex. L101"></div>
-      <div><label>Utförare</label><input id="lineCarrier" placeholder="t.ex. DHL"></div>
+      <div><label>Utförare</label><select id="lineCarrier"></select></div>
     </div>
     <div class="row">
       <div><label>Från terminal</label><input id="lineFrom" placeholder="Göteborg"></div>
@@ -116,16 +140,12 @@
     <h3 id="trFormTitle">Ny transport</h3>
     <div class="row">
       <div><label>Referens / sändningsnr</label><input id="trRef" placeholder="SE12345"></div>
-      <div><label>Beskrivning</label><input id="trDesc" placeholder="Pall, kund X"></div>
     </div>
 
     <h4>1. Hämtning</h4>
     <div class="row">
-      <div><label>Utförare</label><input id="puCarrier"></div>
-      <div><label>Från (adress)</label><input id="puFrom"></div>
-      <div><label>Till terminal</label><input id="puTo"></div>
+      <div><label>Utförare</label><select id="puCarrier"></select></div>
       <div><label>Datum</label><input type="date" id="puDate"></div>
-      <div><label>Planerad tid</label><input type="time" id="puTime"></div>
     </div>
 
     <h4>2. Linjer</h4>
@@ -134,11 +154,8 @@
 
     <h4>3. Utkörning</h4>
     <div class="row">
-      <div><label>Utförare</label><input id="doCarrier"></div>
-      <div><label>Från terminal</label><input id="doFrom"></div>
-      <div><label>Till (adress)</label><input id="doTo"></div>
+      <div><label>Utförare</label><select id="doCarrier"></select></div>
       <div><label>Datum</label><input type="date" id="doDate"></div>
-      <div><label>Planerad tid</label><input type="time" id="doTime"></div>
     </div>
 
     <div style="margin-top:16px; display:flex; gap:8px;">
@@ -150,7 +167,7 @@
   <div class="card">
     <h3>Sparade transporter</h3>
     <table id="trTable">
-      <thead><tr><th>Ref</th><th>Beskrivning</th><th>Hämtning</th><th>Linjer</th><th>Utkörning</th><th></th></tr></thead>
+      <thead><tr><th>Ref</th><th>Hämtning</th><th>Linjer</th><th>Utkörning</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -174,8 +191,9 @@ const STORAGE_KEY = 'transportDelayApp.v1';
 const DAYS_SV = ['Mån','Tis','Ons','Tor','Fre','Lör','Sön']; // ISO 1-7
 
 let state = {
-  lines: [],      // {id, name, carrier, from, to, dep, arr, arrOffset, days:[1..7]}
-  transports: [], // {id, ref, desc, pickup, legs:[{lineId,date}], delivery, scans:[{point,planned,actual}]}
+  carriers: [],   // {id, name, note}
+  lines: [],      // {id, name, carrierId, from, to, dep, arr, arrOffset, days:[1..7]}
+  transports: [], // {id, ref, pickup:{carrierId,date}, legs:[{lineId,date}], delivery:{carrierId,date}, scans}
 };
 
 function load() {
@@ -183,6 +201,7 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) state = JSON.parse(raw);
   } catch (e) { console.error(e); }
+  if (!state.carriers) state.carriers = [];
   if (!state.lines) state.lines = [];
   if (!state.transports) state.transports = [];
 }
@@ -198,6 +217,8 @@ document.querySelectorAll('nav button').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'analyze') renderAnalyze();
     if (btn.dataset.tab === 'transports') renderTransports();
+    if (btn.dataset.tab === 'lines') renderLines();
+    if (btn.dataset.tab === 'carriers') renderCarriers();
   };
 });
 
@@ -224,6 +245,82 @@ document.getElementById('importFile').onchange = (e) => {
   r.readAsText(f);
 };
 
+// ============ CARRIERS ============
+let editingCarrierId = null;
+
+function carrierOptions(selectedId) {
+  return ['<option value="">– välj utförare –</option>']
+    .concat(state.carriers.map(c => `<option value="${c.id}" ${c.id===selectedId?'selected':''}>${esc(c.name)}</option>`))
+    .join('');
+}
+function carrierName(id) {
+  const c = state.carriers.find(x => x.id === id);
+  return c ? c.name : '';
+}
+function refreshCarrierDropdowns() {
+  ['lineCarrier','puCarrier','doCarrier'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = carrierOptions(cur);
+  });
+}
+
+document.getElementById('saveCarrierBtn').onclick = () => {
+  const name = document.getElementById('carrierName').value.trim();
+  const note = document.getElementById('carrierNote').value.trim();
+  if (!name) { alert('Ange namn'); return; }
+  if (editingCarrierId) {
+    const i = state.carriers.findIndex(c => c.id === editingCarrierId);
+    state.carriers[i] = { ...state.carriers[i], name, note };
+  } else {
+    state.carriers.push({ id: uid(), name, note });
+  }
+  save(); clearCarrierForm(); renderCarriers(); refreshCarrierDropdowns();
+};
+document.getElementById('cancelCarrierBtn').onclick = () => clearCarrierForm();
+
+function clearCarrierForm() {
+  editingCarrierId = null;
+  document.getElementById('carrierFormTitle').textContent = 'Ny utförare';
+  document.getElementById('carrierName').value = '';
+  document.getElementById('carrierNote').value = '';
+  document.getElementById('cancelCarrierBtn').style.display = 'none';
+}
+function renderCarriers() {
+  const tb = document.querySelector('#carriersTable tbody');
+  tb.innerHTML = '';
+  if (state.carriers.length === 0) {
+    tb.innerHTML = '<tr><td colspan="3" class="muted">Inga utförare än</td></tr>';
+    return;
+  }
+  state.carriers.forEach(c => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${esc(c.name)}</strong></td>
+      <td>${esc(c.note||'')}</td>
+      <td style="text-align:right">
+        <button class="secondary" data-edit="${c.id}">Ändra</button>
+        <button class="danger" data-del="${c.id}">Ta bort</button>
+      </td>`;
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+    const c = state.carriers.find(x => x.id === b.dataset.edit);
+    editingCarrierId = c.id;
+    document.getElementById('carrierFormTitle').textContent = 'Ändra utförare';
+    document.getElementById('carrierName').value = c.name;
+    document.getElementById('carrierNote').value = c.note||'';
+    document.getElementById('cancelCarrierBtn').style.display = 'inline-block';
+    window.scrollTo(0,0);
+  });
+  tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    if (!confirm('Ta bort utförare? Linjer/transporter som använder den behåller referens men visas tomma.')) return;
+    state.carriers = state.carriers.filter(c => c.id !== b.dataset.del);
+    save(); renderCarriers(); refreshCarrierDropdowns(); renderLines(); renderTransports();
+  });
+}
+
 // ============ LINES ============
 let editingLineId = null;
 
@@ -241,7 +338,7 @@ function getLineFormData() {
   const days = [...document.querySelectorAll('#lineDays input:checked')].map(c => +c.value);
   return {
     name: document.getElementById('lineName').value.trim(),
-    carrier: document.getElementById('lineCarrier').value.trim(),
+    carrierId: document.getElementById('lineCarrier').value,
     from: document.getElementById('lineFrom').value.trim(),
     to: document.getElementById('lineTo').value.trim(),
     dep: document.getElementById('lineDep').value,
@@ -252,7 +349,7 @@ function getLineFormData() {
 }
 function setLineForm(l) {
   document.getElementById('lineName').value = l.name || '';
-  document.getElementById('lineCarrier').value = l.carrier || '';
+  document.getElementById('lineCarrier').innerHTML = carrierOptions(l.carrierId);
   document.getElementById('lineFrom').value = l.from || '';
   document.getElementById('lineTo').value = l.to || '';
   document.getElementById('lineDep').value = l.dep || '';
@@ -264,7 +361,8 @@ function clearLineForm() {
   editingLineId = null;
   document.getElementById('lineFormTitle').textContent = 'Ny linje';
   setLineForm({days:[1,2,3,4,5,6,7]});
-  ['lineName','lineCarrier','lineFrom','lineTo','lineDep','lineArr'].forEach(id => document.getElementById(id).value = '');
+  ['lineName','lineFrom','lineTo','lineDep','lineArr'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('lineCarrier').innerHTML = carrierOptions('');
   document.getElementById('lineArrOffset').value = 1;
   document.querySelectorAll('#lineDays input').forEach(c => c.checked = true);
   document.getElementById('cancelLineBtn').style.display = 'none';
@@ -299,7 +397,7 @@ function renderLines() {
       <td>${esc(l.from)} → ${esc(l.to)}</td>
       <td>${l.dep} – ${arrTxt}</td>
       <td>${daysTxt}</td>
-      <td>${esc(l.carrier||'')}</td>
+      <td>${esc(carrierName(l.carrierId))}</td>
       <td style="text-align:right">
         <button class="secondary" data-edit="${l.id}">Ändra</button>
         <button class="danger" data-del="${l.id}">Ta bort</button>
@@ -386,21 +484,14 @@ document.getElementById('saveTrBtn').onclick = () => {
   const t = {
     id: editingTrId || uid(),
     ref: document.getElementById('trRef').value.trim(),
-    desc: document.getElementById('trDesc').value.trim(),
     pickup: {
-      carrier: document.getElementById('puCarrier').value.trim(),
-      from: document.getElementById('puFrom').value.trim(),
-      to: document.getElementById('puTo').value.trim(),
+      carrierId: document.getElementById('puCarrier').value,
       date: document.getElementById('puDate').value,
-      time: document.getElementById('puTime').value,
     },
     legs: formLegs.filter(l => l.lineId && l.date),
     delivery: {
-      carrier: document.getElementById('doCarrier').value.trim(),
-      from: document.getElementById('doFrom').value.trim(),
-      to: document.getElementById('doTo').value.trim(),
+      carrierId: document.getElementById('doCarrier').value,
       date: document.getElementById('doDate').value,
-      time: document.getElementById('doTime').value,
     },
     scans: editingTrId ? (state.transports.find(x=>x.id===editingTrId)?.scans||[]) : [],
   };
@@ -419,8 +510,9 @@ function clearTrForm() {
   editingTrId = null;
   formLegs = [];
   document.getElementById('trFormTitle').textContent = 'Ny transport';
-  ['trRef','trDesc','puCarrier','puFrom','puTo','puDate','puTime','doCarrier','doFrom','doTo','doDate','doTime']
-    .forEach(id => document.getElementById(id).value = '');
+  ['trRef','puDate','doDate'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('puCarrier').innerHTML = carrierOptions('');
+  document.getElementById('doCarrier').innerHTML = carrierOptions('');
   renderLegs();
   document.getElementById('cancelTrBtn').style.display = 'none';
 }
@@ -428,11 +520,10 @@ function loadTrForm(t) {
   editingTrId = t.id;
   document.getElementById('trFormTitle').textContent = 'Ändra transport';
   document.getElementById('trRef').value = t.ref;
-  document.getElementById('trDesc').value = t.desc||'';
-  for (const k of ['carrier','from','to','date','time']) {
-    document.getElementById('pu'+cap(k)).value = t.pickup[k]||'';
-    document.getElementById('do'+cap(k)).value = t.delivery[k]||'';
-  }
+  document.getElementById('puCarrier').innerHTML = carrierOptions(t.pickup.carrierId||'');
+  document.getElementById('doCarrier').innerHTML = carrierOptions(t.delivery.carrierId||'');
+  document.getElementById('puDate').value = t.pickup.date||'';
+  document.getElementById('doDate').value = t.delivery.date||'';
   formLegs = JSON.parse(JSON.stringify(t.legs||[]));
   renderLegs();
   document.getElementById('cancelTrBtn').style.display = 'inline-block';
@@ -443,20 +534,19 @@ function renderTransports() {
   const tb = document.querySelector('#trTable tbody');
   tb.innerHTML = '';
   if (state.transports.length === 0) {
-    tb.innerHTML = '<tr><td colspan="6" class="muted">Inga transporter än</td></tr>';
+    tb.innerHTML = '<tr><td colspan="5" class="muted">Inga transporter än</td></tr>';
     return;
   }
   state.transports.forEach(t => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong>${esc(t.ref)}</strong></td>
-      <td>${esc(t.desc||'')}</td>
-      <td>${esc(t.pickup.from||'')} ${t.pickup.date||''} ${t.pickup.time||''}</td>
+      <td>${esc(carrierName(t.pickup.carrierId))} ${t.pickup.date||''}</td>
       <td>${t.legs.map(l => {
         const line = state.lines.find(x=>x.id===l.lineId);
         return line ? `<span class="pill">${esc(line.name)} ${l.date}</span>` : '';
       }).join(' ')}</td>
-      <td>${esc(t.delivery.to||'')} ${t.delivery.date||''} ${t.delivery.time||''}</td>
+      <td>${esc(carrierName(t.delivery.carrierId))} ${t.delivery.date||''}</td>
       <td style="text-align:right">
         <button class="secondary" data-edit="${t.id}">Ändra</button>
         <button class="secondary" data-analyze="${t.id}">Analys</button>
@@ -481,28 +571,23 @@ function renderTransports() {
 
 // ============ ANALYZE ============
 function buildPlannedRoute(t) {
-  // Returns array of {type, label, kind: 'dep'|'arr', planned: Date, key}
+  // mode: 'time' = jämför datetime (min), 'date' = jämför endast datum (dagar)
   const pts = [];
-  if (t.pickup.date && t.pickup.time) {
-    pts.push({ type:'Hämtning', label:`Hämtning från ${t.pickup.from||'?'}`, kind:'event', planned: combineDateTime(t.pickup.date, t.pickup.time, 0), key:'pickup' });
-    if (t.pickup.to) {
-      // Pickup ends at terminal — but no specific time, use pickup time as reference
-    }
+  if (t.pickup.date) {
+    pts.push({ type:'Hämtning', label:`Hämtning – ${carrierName(t.pickup.carrierId)||'?'}`, mode:'date',
+      plannedDate: t.pickup.date, key:'pickup' });
   }
   t.legs.forEach((leg, i) => {
     const line = state.lines.find(l => l.id === leg.lineId);
     if (!line || !leg.date) return;
-    pts.push({
-      type:`Linje ${line.name}`, label:`Avgång ${line.from}`, kind:'dep',
-      planned: combineDateTime(leg.date, line.dep, 0), key:`leg-${i}-dep`,
-    });
-    pts.push({
-      type:`Linje ${line.name}`, label:`Ankomst ${line.to}`, kind:'arr',
-      planned: combineDateTime(leg.date, line.arr, line.arrOffset||0), key:`leg-${i}-arr`,
-    });
+    pts.push({ type:`Linje ${line.name}`, label:`Avgång ${line.from}`, mode:'time',
+      planned: combineDateTime(leg.date, line.dep, 0), key:`leg-${i}-dep` });
+    pts.push({ type:`Linje ${line.name}`, label:`Ankomst ${line.to}`, mode:'time',
+      planned: combineDateTime(leg.date, line.arr, line.arrOffset||0), key:`leg-${i}-arr` });
   });
-  if (t.delivery.date && t.delivery.time) {
-    pts.push({ type:'Utkörning', label:`Utkörning till ${t.delivery.to||'?'}`, kind:'event', planned: combineDateTime(t.delivery.date, t.delivery.time, 0), key:'delivery' });
+  if (t.delivery.date) {
+    pts.push({ type:'Utkörning', label:`Utkörning – ${carrierName(t.delivery.carrierId)||'?'}`, mode:'date',
+      plannedDate: t.delivery.date, key:'delivery' });
   }
   return pts;
 }
@@ -510,7 +595,7 @@ function buildPlannedRoute(t) {
 function renderAnalyze() {
   const sel = document.getElementById('analyzeSelect');
   sel.innerHTML = '<option value="">– välj transport –</option>' +
-    state.transports.map(t => `<option value="${t.id}">${esc(t.ref)} ${esc(t.desc||'')}</option>`).join('');
+    state.transports.map(t => `<option value="${t.id}">${esc(t.ref)}</option>`).join('');
   sel.onchange = () => renderAnalyzeFor(sel.value);
   if (sel.value) renderAnalyzeFor(sel.value);
   else document.getElementById('analyzeOutput').innerHTML = '';
@@ -531,14 +616,23 @@ function renderAnalyzeFor(id) {
 
   const rows = route.map(p => {
     const s = scanMap[p.key];
-    let deltaMin = null;
+    let deltaMin = null, deltaDays = null, delayed = false;
     if (s.actual) {
-      const actual = new Date(s.actual);
-      deltaMin = Math.round((actual - p.planned) / 60000);
-      if (deltaMin > 15 && firstDelayKey === null) { firstDelayKey = p.key; firstDelayMin = deltaMin; }
-      if (deltaMin > 0) totalDelay = Math.max(totalDelay, deltaMin);
+      if (p.mode === 'time') {
+        const actual = new Date(s.actual);
+        deltaMin = Math.round((actual - p.planned) / 60000);
+        delayed = deltaMin > 15;
+      } else {
+        // datum-läge: jämför YYYY-MM-DD
+        const [y,m,d] = p.plannedDate.split('-').map(Number);
+        const planned = new Date(y, m-1, d);
+        const actual = new Date(s.actual + 'T00:00');
+        deltaDays = Math.round((actual - planned) / 86400000);
+        delayed = deltaDays > 0;
+      }
+      if (delayed && firstDelayKey === null) { firstDelayKey = p.key; }
     }
-    return { p, s, deltaMin };
+    return { p, s, deltaMin, deltaDays, delayed };
   });
 
   let html = '';
@@ -546,9 +640,10 @@ function renderAnalyzeFor(id) {
   if (lastScanned) {
     if (firstDelayKey) {
       const f = rows.find(r => r.p.key === firstDelayKey);
-      html += `<div class="summary bad"><strong>Försening uppstod här:</strong> ${esc(f.p.type)} – ${esc(f.p.label)} (${formatDelta(f.deltaMin)})<br><span class="muted">Senaste skannade avvikelse: ${formatDelta(lastScanned.deltaMin)}</span></div>`;
+      const dTxt = f.p.mode === 'time' ? formatDelta(f.deltaMin) : formatDeltaDays(f.deltaDays);
+      html += `<div class="summary bad"><strong>Försening uppstod här:</strong> ${esc(f.p.type)} – ${esc(f.p.label)} (${dTxt})</div>`;
     } else {
-      html += `<div class="summary ok"><strong>I tid</strong> – inga försenade skanningspunkter (>15 min) hittills.</div>`;
+      html += `<div class="summary ok"><strong>I tid</strong> – inga försenade skanningspunkter hittills.</div>`;
     }
   } else {
     html += `<div class="summary"><span class="muted">Inga skanningstider angivna än.</span></div>`;
@@ -560,13 +655,27 @@ function renderAnalyzeFor(id) {
         <div></div><div>Punkt</div><div>Planerad</div><div>Faktisk skann</div><div>Avvikelse</div>
       </div>`;
   rows.forEach(r => {
-    const cls = r.deltaMin == null ? '' : r.deltaMin > 15 ? 'bad' : r.deltaMin > 0 ? 'warn' : 'ok';
-    const deltaTxt = r.deltaMin == null ? '<span class="muted">–</span>' : `<span class="delta-${cls === 'bad' ? 'bad' : cls === 'warn' ? 'warn' : 'ok'}">${formatDelta(r.deltaMin)}</span>`;
+    let cls = '', deltaTxt = '<span class="muted">–</span>', plannedTxt = '', inputHtml = '';
+    if (r.p.mode === 'time') {
+      plannedTxt = fmtDateTime(r.p.planned);
+      inputHtml = `<input type="datetime-local" data-scan="${r.p.key}" data-mode="time" value="${r.s.actual||''}" style="font-size:12px">`;
+      if (r.deltaMin != null) {
+        cls = r.deltaMin > 15 ? 'bad' : r.deltaMin > 0 ? 'warn' : 'ok';
+        deltaTxt = `<span class="delta-${cls}">${formatDelta(r.deltaMin)}</span>`;
+      }
+    } else {
+      plannedTxt = r.p.plannedDate;
+      inputHtml = `<input type="date" data-scan="${r.p.key}" data-mode="date" value="${r.s.actual||''}" style="font-size:12px">`;
+      if (r.deltaDays != null) {
+        cls = r.deltaDays > 0 ? 'bad' : r.deltaDays < 0 ? 'ok' : 'ok';
+        deltaTxt = `<span class="delta-${cls}">${formatDeltaDays(r.deltaDays)}</span>`;
+      }
+    }
     html += `<div class="timeline-row">
       <div class="dot ${cls}"></div>
       <div><strong>${esc(r.p.type)}</strong><br><span class="muted">${esc(r.p.label)}</span></div>
-      <div>${fmtDateTime(r.p.planned)}</div>
-      <div><input type="datetime-local" data-scan="${r.p.key}" value="${r.s.actual||''}" style="font-size:12px"></div>
+      <div>${plannedTxt}</div>
+      <div>${inputHtml}</div>
       <div>${deltaTxt}</div>
     </div>`;
   });
@@ -604,11 +713,19 @@ function formatDelta(min) {
   const h = Math.floor(a/60), m = a%60;
   return `${sign}${h}h ${m}min`;
 }
+function formatDeltaDays(d) {
+  if (d === 0) return 'samma dag';
+  const sign = d > 0 ? '+' : '−';
+  const a = Math.abs(d);
+  return `${sign}${a} ${a===1?'dag':'dagar'}`;
+}
 function esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 // ============ INIT ============
 function renderAll() {
+  renderCarriers();
+  refreshCarrierDropdowns();
   renderLines();
   renderTransports();
   renderAnalyze();
