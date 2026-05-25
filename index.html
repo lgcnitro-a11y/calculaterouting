@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Transportförsening – kalkylator</title>
+<style>
+  :root {
+    --bg:#0f172a; --panel:#1e293b; --panel2:#334155; --border:#475569;
+    --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --ok:#22c55e;
+    --warn:#f59e0b; --bad:#ef4444;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); }
+  header { background:var(--panel); padding:12px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:18px; }
+  nav button { background:transparent; color:var(--text); border:1px solid var(--border); padding:6px 12px; border-radius:6px; cursor:pointer; }
+  nav button.active { background:var(--accent); color:#0f172a; border-color:var(--accent); }
+  .io { margin-left:auto; display:flex; gap:8px; }
+  main { padding:20px; max-width:1200px; margin:0 auto; }
+  section { display:none; }
+  section.active { display:block; }
+  h2 { margin-top:0; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > * { flex:1; min-width:140px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input, select, textarea, button { font:inherit; padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--panel2); color:var(--text); width:100%; }
+  button { cursor:pointer; background:var(--accent); color:#0f172a; border:none; font-weight:600; }
+  button.secondary { background:var(--panel2); color:var(--text); border:1px solid var(--border); font-weight:400; }
+  button.danger { background:var(--bad); color:white; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--border); font-size:14px; vertical-align:top; }
+  th { color:var(--muted); font-weight:500; }
+  .weekdays { display:flex; gap:4px; flex-wrap:wrap; }
+  .weekdays label { display:flex; align-items:center; gap:4px; background:var(--panel2); padding:4px 8px; border-radius:4px; cursor:pointer; margin:0; font-size:13px; color:var(--text); }
+  .weekdays input { width:auto; }
+  .leg { background:var(--panel2); border:1px solid var(--border); border-radius:6px; padding:12px; margin-bottom:8px; }
+  .leg-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .leg-type { font-size:11px; text-transform:uppercase; color:var(--muted); letter-spacing:1px; }
+  .delta-ok { color:var(--ok); font-weight:600; }
+  .delta-warn { color:var(--warn); font-weight:600; }
+  .delta-bad { color:var(--bad); font-weight:600; }
+  .muted { color:var(--muted); font-size:13px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; background:var(--panel2); }
+  .timeline { font-family:ui-monospace,monospace; font-size:13px; }
+  .timeline-row { display:grid; grid-template-columns:24px 1fr 110px 110px 100px; gap:8px; padding:6px 0; border-bottom:1px dashed var(--border); align-items:center; }
+  .dot { width:12px; height:12px; border-radius:50%; background:var(--muted); margin:0 auto; }
+  .dot.ok { background:var(--ok); }
+  .dot.warn { background:var(--warn); }
+  .dot.bad { background:var(--bad); }
+  .summary { padding:12px; border-radius:6px; margin-bottom:12px; }
+  .summary.ok { background:rgba(34,197,94,.15); border:1px solid var(--ok); }
+  .summary.bad { background:rgba(239,68,68,.15); border:1px solid var(--bad); }
+  .grow0 { flex:0 0 auto; min-width:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚚 Transportförsening</h1>
+  <nav>
+    <button data-tab="lines" class="active">Linjer</button>
+    <button data-tab="transports">Transporter</button>
+    <button data-tab="analyze">Analys</button>
+  </nav>
+  <div class="io">
+    <button class="secondary" id="exportBtn">Exportera</button>
+    <button class="secondary" id="importBtn">Importera</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+  </div>
+</header>
+
+<main>
+
+<!-- ============ LINJER ============ -->
+<section id="tab-lines" class="active">
+  <h2>Linjeregister</h2>
+  <div class="card">
+    <h3 id="lineFormTitle">Ny linje</h3>
+    <div class="row">
+      <div><label>Namn / linjenr</label><input id="lineName" placeholder="t.ex. L101"></div>
+      <div><label>Utförare</label><input id="lineCarrier" placeholder="t.ex. DHL"></div>
+    </div>
+    <div class="row">
+      <div><label>Från terminal</label><input id="lineFrom" placeholder="Göteborg"></div>
+      <div><label>Till terminal</label><input id="lineTo" placeholder="Stockholm"></div>
+    </div>
+    <div class="row">
+      <div><label>Avgångstid</label><input type="time" id="lineDep"></div>
+      <div><label>Ankomsttid</label><input type="time" id="lineArr"></div>
+      <div class="grow0"><label>Ankomst dag</label>
+        <select id="lineArrOffset" style="width:auto"><option value="0">samma dag</option><option value="1" selected>+1 dag</option><option value="2">+2 dagar</option></select>
+      </div>
+    </div>
+    <label style="margin-top:8px">Trafikeras (veckodagar)</label>
+    <div class="weekdays" id="lineDays"></div>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button id="saveLineBtn">Spara linje</button>
+      <button class="secondary" id="cancelLineBtn" style="display:none">Avbryt</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Sparade linjer</h3>
+    <table id="linesTable">
+      <thead><tr><th>Linje</th><th>Sträcka</th><th>Tid</th><th>Dagar</th><th>Utförare</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ TRANSPORTER ============ -->
+<section id="tab-transports">
+  <h2>Transporter</h2>
+  <div class="card">
+    <h3 id="trFormTitle">Ny transport</h3>
+    <div class="row">
+      <div><label>Referens / sändningsnr</label><input id="trRef" placeholder="SE12345"></div>
+      <div><label>Beskrivning</label><input id="trDesc" placeholder="Pall, kund X"></div>
+    </div>
+
+    <h4>1. Hämtning</h4>
+    <div class="row">
+      <div><label>Utförare</label><input id="puCarrier"></div>
+      <div><label>Från (adress)</label><input id="puFrom"></div>
+      <div><label>Till terminal</label><input id="puTo"></div>
+      <div><label>Datum</label><input type="date" id="puDate"></div>
+      <div><label>Planerad tid</label><input type="time" id="puTime"></div>
+    </div>
+
+    <h4>2. Linjer</h4>
+    <div id="legsContainer"></div>
+    <button class="secondary" id="addLegBtn" style="margin-top:8px">+ Lägg till linje</button>
+
+    <h4>3. Utkörning</h4>
+    <div class="row">
+      <div><label>Utförare</label><input id="doCarrier"></div>
+      <div><label>Från terminal</label><input id="doFrom"></div>
+      <div><label>Till (adress)</label><input id="doTo"></div>
+      <div><label>Datum</label><input type="date" id="doDate"></div>
+      <div><label>Planerad tid</label><input type="time" id="doTime"></div>
+    </div>
+
+    <div style="margin-top:16px; display:flex; gap:8px;">
+      <button id="saveTrBtn">Spara transport</button>
+      <button class="secondary" id="cancelTrBtn" style="display:none">Avbryt</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Sparade transporter</h3>
+    <table id="trTable">
+      <thead><tr><th>Ref</th><th>Beskrivning</th><th>Hämtning</th><th>Linjer</th><th>Utkörning</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ ANALYS ============ -->
+<section id="tab-analyze">
+  <h2>Analys av skanningspunkter</h2>
+  <div class="card">
+    <label>Välj transport</label>
+    <select id="analyzeSelect"></select>
+  </div>
+  <div id="analyzeOutput"></div>
+</section>
+
+</main>
+
+<script>
+// ============ STATE & STORAGE ============
+const STORAGE_KEY = 'transportDelayApp.v1';
+const DAYS_SV = ['Mån','Tis','Ons','Tor','Fre','Lör','Sön']; // ISO 1-7
+
+let state = {
+  lines: [],      // {id, name, carrier, from, to, dep, arr, arrOffset, days:[1..7]}
+  transports: [], // {id, ref, desc, pickup, legs:[{lineId,date}], delivery, scans:[{point,planned,actual}]}
+};
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) state = JSON.parse(raw);
+  } catch (e) { console.error(e); }
+  if (!state.lines) state.lines = [];
+  if (!state.transports) state.transports = [];
+}
+function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+// ============ TABS ============
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'analyze') renderAnalyze();
+    if (btn.dataset.tab === 'transports') renderTransports();
+  };
+});
+
+// ============ EXPORT / IMPORT ============
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'transport-data-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+};
+document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
+document.getElementById('importFile').onchange = (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const data = JSON.parse(r.result);
+      if (!data.lines || !data.transports) throw new Error('Ogiltigt format');
+      if (!confirm('Skriv över nuvarande data?')) return;
+      state = data; save(); renderAll();
+    } catch (err) { alert('Importfel: ' + err.message); }
+  };
+  r.readAsText(f);
+};
+
+// ============ LINES ============
+let editingLineId = null;
+
+function renderWeekdayPicker() {
+  const c = document.getElementById('lineDays');
+  c.innerHTML = '';
+  DAYS_SV.forEach((d,i) => {
+    const lbl = document.createElement('label');
+    lbl.innerHTML = `<input type="checkbox" value="${i+1}" checked> ${d}`;
+    c.appendChild(lbl);
+  });
+}
+
+function getLineFormData() {
+  const days = [...document.querySelectorAll('#lineDays input:checked')].map(c => +c.value);
+  return {
+    name: document.getElementById('lineName').value.trim(),
+    carrier: document.getElementById('lineCarrier').value.trim(),
+    from: document.getElementById('lineFrom').value.trim(),
+    to: document.getElementById('lineTo').value.trim(),
+    dep: document.getElementById('lineDep').value,
+    arr: document.getElementById('lineArr').value,
+    arrOffset: +document.getElementById('lineArrOffset').value,
+    days,
+  };
+}
+function setLineForm(l) {
+  document.getElementById('lineName').value = l.name || '';
+  document.getElementById('lineCarrier').value = l.carrier || '';
+  document.getElementById('lineFrom').value = l.from || '';
+  document.getElementById('lineTo').value = l.to || '';
+  document.getElementById('lineDep').value = l.dep || '';
+  document.getElementById('lineArr').value = l.arr || '';
+  document.getElementById('lineArrOffset').value = l.arrOffset ?? 1;
+  document.querySelectorAll('#lineDays input').forEach(c => c.checked = l.days ? l.days.includes(+c.value) : true);
+}
+function clearLineForm() {
+  editingLineId = null;
+  document.getElementById('lineFormTitle').textContent = 'Ny linje';
+  setLineForm({days:[1,2,3,4,5,6,7]});
+  ['lineName','lineCarrier','lineFrom','lineTo','lineDep','lineArr'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('lineArrOffset').value = 1;
+  document.querySelectorAll('#lineDays input').forEach(c => c.checked = true);
+  document.getElementById('cancelLineBtn').style.display = 'none';
+}
+
+document.getElementById('saveLineBtn').onclick = () => {
+  const d = getLineFormData();
+  if (!d.name || !d.from || !d.to || !d.dep || !d.arr) { alert('Fyll i namn, terminaler och tider'); return; }
+  if (editingLineId) {
+    const i = state.lines.findIndex(l => l.id === editingLineId);
+    state.lines[i] = { ...state.lines[i], ...d };
+  } else {
+    state.lines.push({ id: uid(), ...d });
+  }
+  save(); clearLineForm(); renderLines();
+};
+document.getElementById('cancelLineBtn').onclick = clearLineForm;
+
+function renderLines() {
+  const tb = document.querySelector('#linesTable tbody');
+  tb.innerHTML = '';
+  if (state.lines.length === 0) {
+    tb.innerHTML = '<tr><td colspan="6" class="muted">Inga linjer än</td></tr>';
+    return;
+  }
+  state.lines.forEach(l => {
+    const tr = document.createElement('tr');
+    const daysTxt = l.days.length === 7 ? 'Alla' : l.days.map(d => DAYS_SV[d-1]).join(',');
+    const arrTxt = l.arr + (l.arrOffset ? ` (+${l.arrOffset}d)` : '');
+    tr.innerHTML = `
+      <td><strong>${esc(l.name)}</strong></td>
+      <td>${esc(l.from)} → ${esc(l.to)}</td>
+      <td>${l.dep} – ${arrTxt}</td>
+      <td>${daysTxt}</td>
+      <td>${esc(l.carrier||'')}</td>
+      <td style="text-align:right">
+        <button class="secondary" data-edit="${l.id}">Ändra</button>
+        <button class="danger" data-del="${l.id}">Ta bort</button>
+      </td>`;
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+    const l = state.lines.find(x => x.id === b.dataset.edit);
+    editingLineId = l.id;
+    document.getElementById('lineFormTitle').textContent = 'Ändra linje';
+    setLineForm(l);
+    document.getElementById('cancelLineBtn').style.display = 'inline-block';
+    window.scrollTo(0,0);
+  });
+  tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    if (!confirm('Ta bort linjen?')) return;
+    state.lines = state.lines.filter(l => l.id !== b.dataset.del);
+    save(); renderLines();
+  });
+}
+
+// ============ TRANSPORTS ============
+let editingTrId = null;
+let formLegs = []; // [{lineId, date}]
+
+document.getElementById('addLegBtn').onclick = () => {
+  formLegs.push({ lineId:'', date:'' });
+  renderLegs();
+};
+
+function renderLegs() {
+  const c = document.getElementById('legsContainer');
+  c.innerHTML = '';
+  if (formLegs.length === 0) {
+    c.innerHTML = '<div class="muted">Inga linjer tillagda</div>';
+    return;
+  }
+  formLegs.forEach((leg, idx) => {
+    const div = document.createElement('div');
+    div.className = 'leg';
+    const opts = ['<option value="">– välj linje –</option>']
+      .concat(state.lines.map(l => `<option value="${l.id}" ${l.id===leg.lineId?'selected':''}>${esc(l.name)} | ${esc(l.from)}→${esc(l.to)} (${l.dep}–${l.arr})</option>`))
+      .join('');
+    div.innerHTML = `
+      <div class="leg-head">
+        <span class="leg-type">Linje ${idx+1}</span>
+        <button class="danger" data-rm="${idx}" style="width:auto; padding:4px 8px;">Ta bort</button>
+      </div>
+      <div class="row">
+        <div style="flex:2"><label>Linje</label><select data-leg-line="${idx}">${opts}</select></div>
+        <div><label>Avgångsdatum</label><input type="date" data-leg-date="${idx}" value="${leg.date||''}"></div>
+      </div>
+      <div class="muted" id="legPreview-${idx}" style="margin-top:6px"></div>
+    `;
+    c.appendChild(div);
+    updateLegPreview(idx);
+  });
+  c.querySelectorAll('[data-leg-line]').forEach(sel => sel.onchange = () => {
+    formLegs[+sel.dataset.legLine].lineId = sel.value;
+    updateLegPreview(+sel.dataset.legLine);
+  });
+  c.querySelectorAll('[data-leg-date]').forEach(inp => inp.onchange = () => {
+    formLegs[+inp.dataset.legDate].date = inp.value;
+    updateLegPreview(+inp.dataset.legDate);
+  });
+  c.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
+    formLegs.splice(+b.dataset.rm, 1); renderLegs();
+  });
+}
+function updateLegPreview(idx) {
+  const leg = formLegs[idx];
+  const el = document.getElementById('legPreview-' + idx);
+  if (!el) return;
+  if (!leg.lineId || !leg.date) { el.textContent = ''; return; }
+  const line = state.lines.find(l => l.id === leg.lineId);
+  if (!line) return;
+  const dep = combineDateTime(leg.date, line.dep, 0);
+  const arr = combineDateTime(leg.date, line.arr, line.arrOffset||0);
+  const iso = (d) => d.toISOString().slice(0,16).replace('T',' ');
+  el.textContent = `Planerad: avgång ${iso(dep)} → ankomst ${iso(arr)}`;
+}
+
+document.getElementById('saveTrBtn').onclick = () => {
+  const t = {
+    id: editingTrId || uid(),
+    ref: document.getElementById('trRef').value.trim(),
+    desc: document.getElementById('trDesc').value.trim(),
+    pickup: {
+      carrier: document.getElementById('puCarrier').value.trim(),
+      from: document.getElementById('puFrom').value.trim(),
+      to: document.getElementById('puTo').value.trim(),
+      date: document.getElementById('puDate').value,
+      time: document.getElementById('puTime').value,
+    },
+    legs: formLegs.filter(l => l.lineId && l.date),
+    delivery: {
+      carrier: document.getElementById('doCarrier').value.trim(),
+      from: document.getElementById('doFrom').value.trim(),
+      to: document.getElementById('doTo').value.trim(),
+      date: document.getElementById('doDate').value,
+      time: document.getElementById('doTime').value,
+    },
+    scans: editingTrId ? (state.transports.find(x=>x.id===editingTrId)?.scans||[]) : [],
+  };
+  if (!t.ref) { alert('Ange referensnummer'); return; }
+  if (editingTrId) {
+    const i = state.transports.findIndex(x => x.id === editingTrId);
+    state.transports[i] = t;
+  } else {
+    state.transports.push(t);
+  }
+  save(); clearTrForm(); renderTransports();
+};
+document.getElementById('cancelTrBtn').onclick = clearTrForm;
+
+function clearTrForm() {
+  editingTrId = null;
+  formLegs = [];
+  document.getElementById('trFormTitle').textContent = 'Ny transport';
+  ['trRef','trDesc','puCarrier','puFrom','puTo','puDate','puTime','doCarrier','doFrom','doTo','doDate','doTime']
+    .forEach(id => document.getElementById(id).value = '');
+  renderLegs();
+  document.getElementById('cancelTrBtn').style.display = 'none';
+}
+function loadTrForm(t) {
+  editingTrId = t.id;
+  document.getElementById('trFormTitle').textContent = 'Ändra transport';
+  document.getElementById('trRef').value = t.ref;
+  document.getElementById('trDesc').value = t.desc||'';
+  for (const k of ['carrier','from','to','date','time']) {
+    document.getElementById('pu'+cap(k)).value = t.pickup[k]||'';
+    document.getElementById('do'+cap(k)).value = t.delivery[k]||'';
+  }
+  formLegs = JSON.parse(JSON.stringify(t.legs||[]));
+  renderLegs();
+  document.getElementById('cancelTrBtn').style.display = 'inline-block';
+  window.scrollTo(0,0);
+}
+
+function renderTransports() {
+  const tb = document.querySelector('#trTable tbody');
+  tb.innerHTML = '';
+  if (state.transports.length === 0) {
+    tb.innerHTML = '<tr><td colspan="6" class="muted">Inga transporter än</td></tr>';
+    return;
+  }
+  state.transports.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${esc(t.ref)}</strong></td>
+      <td>${esc(t.desc||'')}</td>
+      <td>${esc(t.pickup.from||'')} ${t.pickup.date||''} ${t.pickup.time||''}</td>
+      <td>${t.legs.map(l => {
+        const line = state.lines.find(x=>x.id===l.lineId);
+        return line ? `<span class="pill">${esc(line.name)} ${l.date}</span>` : '';
+      }).join(' ')}</td>
+      <td>${esc(t.delivery.to||'')} ${t.delivery.date||''} ${t.delivery.time||''}</td>
+      <td style="text-align:right">
+        <button class="secondary" data-edit="${t.id}">Ändra</button>
+        <button class="secondary" data-analyze="${t.id}">Analys</button>
+        <button class="danger" data-del="${t.id}">Ta bort</button>
+      </td>`;
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+    loadTrForm(state.transports.find(x => x.id === b.dataset.edit));
+  });
+  tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    if (!confirm('Ta bort transport?')) return;
+    state.transports = state.transports.filter(x => x.id !== b.dataset.del);
+    save(); renderTransports();
+  });
+  tb.querySelectorAll('[data-analyze]').forEach(b => b.onclick = () => {
+    document.querySelector('nav button[data-tab="analyze"]').click();
+    document.getElementById('analyzeSelect').value = b.dataset.analyze;
+    renderAnalyze();
+  });
+}
+
+// ============ ANALYZE ============
+function buildPlannedRoute(t) {
+  // Returns array of {type, label, kind: 'dep'|'arr', planned: Date, key}
+  const pts = [];
+  if (t.pickup.date && t.pickup.time) {
+    pts.push({ type:'Hämtning', label:`Hämtning från ${t.pickup.from||'?'}`, kind:'event', planned: combineDateTime(t.pickup.date, t.pickup.time, 0), key:'pickup' });
+    if (t.pickup.to) {
+      // Pickup ends at terminal — but no specific time, use pickup time as reference
+    }
+  }
+  t.legs.forEach((leg, i) => {
+    const line = state.lines.find(l => l.id === leg.lineId);
+    if (!line || !leg.date) return;
+    pts.push({
+      type:`Linje ${line.name}`, label:`Avgång ${line.from}`, kind:'dep',
+      planned: combineDateTime(leg.date, line.dep, 0), key:`leg-${i}-dep`,
+    });
+    pts.push({
+      type:`Linje ${line.name}`, label:`Ankomst ${line.to}`, kind:'arr',
+      planned: combineDateTime(leg.date, line.arr, line.arrOffset||0), key:`leg-${i}-arr`,
+    });
+  });
+  if (t.delivery.date && t.delivery.time) {
+    pts.push({ type:'Utkörning', label:`Utkörning till ${t.delivery.to||'?'}`, kind:'event', planned: combineDateTime(t.delivery.date, t.delivery.time, 0), key:'delivery' });
+  }
+  return pts;
+}
+
+function renderAnalyze() {
+  const sel = document.getElementById('analyzeSelect');
+  sel.innerHTML = '<option value="">– välj transport –</option>' +
+    state.transports.map(t => `<option value="${t.id}">${esc(t.ref)} ${esc(t.desc||'')}</option>`).join('');
+  sel.onchange = () => renderAnalyzeFor(sel.value);
+  if (sel.value) renderAnalyzeFor(sel.value);
+  else document.getElementById('analyzeOutput').innerHTML = '';
+}
+function renderAnalyzeFor(id) {
+  const out = document.getElementById('analyzeOutput');
+  const t = state.transports.find(x => x.id === id);
+  if (!t) { out.innerHTML = ''; return; }
+  const route = buildPlannedRoute(t);
+  if (!t.scans) t.scans = [];
+  // Sync scans with route
+  const scanMap = Object.fromEntries(t.scans.map(s => [s.key, s]));
+  route.forEach(p => { if (!scanMap[p.key]) scanMap[p.key] = { key:p.key, actual:'' }; });
+
+  let firstDelayKey = null;
+  let firstDelayMin = 0;
+  let totalDelay = 0;
+
+  const rows = route.map(p => {
+    const s = scanMap[p.key];
+    let deltaMin = null;
+    if (s.actual) {
+      const actual = new Date(s.actual);
+      deltaMin = Math.round((actual - p.planned) / 60000);
+      if (deltaMin > 15 && firstDelayKey === null) { firstDelayKey = p.key; firstDelayMin = deltaMin; }
+      if (deltaMin > 0) totalDelay = Math.max(totalDelay, deltaMin);
+    }
+    return { p, s, deltaMin };
+  });
+
+  let html = '';
+  const lastScanned = rows.filter(r => r.s.actual).pop();
+  if (lastScanned) {
+    if (firstDelayKey) {
+      const f = rows.find(r => r.p.key === firstDelayKey);
+      html += `<div class="summary bad"><strong>Försening uppstod här:</strong> ${esc(f.p.type)} – ${esc(f.p.label)} (${formatDelta(f.deltaMin)})<br><span class="muted">Senaste skannade avvikelse: ${formatDelta(lastScanned.deltaMin)}</span></div>`;
+    } else {
+      html += `<div class="summary ok"><strong>I tid</strong> – inga försenade skanningspunkter (>15 min) hittills.</div>`;
+    }
+  } else {
+    html += `<div class="summary"><span class="muted">Inga skanningstider angivna än.</span></div>`;
+  }
+
+  html += `<div class="card"><h3>Tidslinje</h3>
+    <div class="timeline">
+      <div class="timeline-row" style="border-bottom:1px solid var(--border); color:var(--muted)">
+        <div></div><div>Punkt</div><div>Planerad</div><div>Faktisk skann</div><div>Avvikelse</div>
+      </div>`;
+  rows.forEach(r => {
+    const cls = r.deltaMin == null ? '' : r.deltaMin > 15 ? 'bad' : r.deltaMin > 0 ? 'warn' : 'ok';
+    const deltaTxt = r.deltaMin == null ? '<span class="muted">–</span>' : `<span class="delta-${cls === 'bad' ? 'bad' : cls === 'warn' ? 'warn' : 'ok'}">${formatDelta(r.deltaMin)}</span>`;
+    html += `<div class="timeline-row">
+      <div class="dot ${cls}"></div>
+      <div><strong>${esc(r.p.type)}</strong><br><span class="muted">${esc(r.p.label)}</span></div>
+      <div>${fmtDateTime(r.p.planned)}</div>
+      <div><input type="datetime-local" data-scan="${r.p.key}" value="${r.s.actual||''}" style="font-size:12px"></div>
+      <div>${deltaTxt}</div>
+    </div>`;
+  });
+  html += `</div></div>`;
+  out.innerHTML = html;
+
+  out.querySelectorAll('[data-scan]').forEach(inp => inp.onchange = () => {
+    const key = inp.dataset.scan;
+    let s = t.scans.find(x => x.key === key);
+    if (!s) { s = { key, actual:'' }; t.scans.push(s); }
+    s.actual = inp.value;
+    // Remove empty scans to keep tidy
+    t.scans = t.scans.filter(x => x.actual);
+    save(); renderAnalyzeFor(id);
+  });
+}
+
+// ============ UTILS ============
+function combineDateTime(dateStr, timeStr, dayOffset=0) {
+  // Local time
+  const [y,m,d] = dateStr.split('-').map(Number);
+  const [hh,mm] = timeStr.split(':').map(Number);
+  const dt = new Date(y, m-1, d + dayOffset, hh, mm);
+  return dt;
+}
+function fmtDateTime(d) {
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function formatDelta(min) {
+  if (min === 0) return '±0 min';
+  const sign = min > 0 ? '+' : '−';
+  const a = Math.abs(min);
+  if (a < 60) return `${sign}${a} min`;
+  const h = Math.floor(a/60), m = a%60;
+  return `${sign}${h}h ${m}min`;
+}
+function esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+// ============ INIT ============
+function renderAll() {
+  renderLines();
+  renderTransports();
+  renderAnalyze();
+}
+load();
+renderWeekdayPicker();
+clearLineForm();
+renderAll();
+</script>
+</body>
+</html>
