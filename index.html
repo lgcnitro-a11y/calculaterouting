@@ -616,24 +616,58 @@ function renderAnalyzeFor(id) {
 
   const rows = route.map(p => {
     const s = scanMap[p.key];
-    let deltaMin = null, deltaDays = null, delayed = false;
-    if (s.actual) {
-      if (p.mode === 'time') {
+    let deltaMin = null, deltaDays = null, delayed = false, plannedMs = null, actualMs = null;
+    if (p.mode === 'time') {
+      plannedMs = p.planned.getTime();
+      if (s.actual) {
         const actual = new Date(s.actual);
+        actualMs = actual.getTime();
         deltaMin = Math.round((actual - p.planned) / 60000);
         delayed = deltaMin > 15;
-      } else {
-        // datum-läge: jämför YYYY-MM-DD
-        const [y,m,d] = p.plannedDate.split('-').map(Number);
-        const planned = new Date(y, m-1, d);
+      }
+    } else {
+      const [y,m,d] = p.plannedDate.split('-').map(Number);
+      plannedMs = new Date(y, m-1, d).getTime();
+      if (s.actual) {
         const actual = new Date(s.actual + 'T00:00');
-        deltaDays = Math.round((actual - planned) / 86400000);
+        actualMs = actual.getTime();
+        deltaDays = Math.round((actual - new Date(y, m-1, d)) / 86400000);
         delayed = deltaDays > 0;
       }
-      if (delayed && firstDelayKey === null) { firstDelayKey = p.key; }
     }
-    return { p, s, deltaMin, deltaDays, delayed };
+    if (delayed && firstDelayKey === null) { firstDelayKey = p.key; }
+    return { p, s, deltaMin, deltaDays, delayed, plannedMs, actualMs };
   });
+
+  // Beräkna inkrementell försening mellan på varandra följande skanningspunkter
+  const scanned = rows.filter(r => r.actualMs != null);
+  const segments = []; // {fromRow, toRow, addedMs, missingRows:[...]}
+  let prev = null;
+  rows.forEach(r => {
+    if (r.actualMs != null) {
+      if (prev) {
+        const prevDelay = prev.actualMs - prev.plannedMs;
+        const thisDelay = r.actualMs - r.plannedMs;
+        const added = thisDelay - prevDelay;
+        const between = rows.slice(rows.indexOf(prev)+1, rows.indexOf(r)).filter(x => x.actualMs == null);
+        segments.push({ fromRow: prev, toRow: r, addedMs: added, missingRows: between });
+      } else if (rows.indexOf(r) > 0) {
+        // första skannade punkten — vad inträffade innan?
+        const thisDelay = r.actualMs - r.plannedMs;
+        const before = rows.slice(0, rows.indexOf(r)).filter(x => x.actualMs == null);
+        if (before.length > 0 || thisDelay !== 0) {
+          segments.push({ fromRow: null, toRow: r, addedMs: thisDelay, missingRows: before });
+        }
+      }
+      prev = r;
+    }
+  });
+  // Eventuella oskannade punkter efter sista skanningen
+  const lastIdx = prev ? rows.indexOf(prev) : -1;
+  if (prev && lastIdx < rows.length - 1) {
+    const tail = rows.slice(lastIdx+1).filter(x => x.actualMs == null);
+    if (tail.length > 0) segments.push({ fromRow: prev, toRow: null, addedMs: null, missingRows: tail });
+  }
 
   let html = '';
   const lastScanned = rows.filter(r => r.s.actual).pop();
@@ -680,6 +714,63 @@ function renderAnalyzeFor(id) {
     </div>`;
   });
   html += `</div></div>`;
+
+  // ===== Förseningsanalys =====
+  if (scanned.length > 0) {
+    html += `<div class="card"><h3>Förseningsanalys</h3>`;
+    html += `<p class="muted">Visar var ny försening tillkommit. Inkrementell försening = skillnaden mellan total försening vid två på varandra följande skanningspunkter. Oskannade punkter mellan dem kan dölja var i segmentet det skedde.</p>`;
+    html += `<ul style="line-height:1.7">`;
+
+    segments.forEach(seg => {
+      const fromTxt = seg.fromRow
+        ? `<strong>${esc(seg.fromRow.p.type)}</strong> (${esc(seg.fromRow.p.label)})`
+        : `<strong>Start</strong>`;
+      const toTxt = seg.toRow
+        ? `<strong>${esc(seg.toRow.p.type)}</strong> (${esc(seg.toRow.p.label)})`
+        : `<strong>efter sista skanning</strong>`;
+
+      if (seg.addedMs == null) {
+        // Oskannad svans
+        html += `<li>⚪ Mellan ${fromTxt} och slutet finns ${seg.missingRows.length} oskannad${seg.missingRows.length===1?'':'e'} punkt${seg.missingRows.length===1?'':'er'} – ingen information om vad som skett där.</li>`;
+        return;
+      }
+
+      const addedMin = Math.round(seg.addedMs / 60000);
+      const missingTxt = seg.missingRows.length > 0
+        ? ` – passerar ${seg.missingRows.length} oskannad${seg.missingRows.length===1?' punkt':'a punkter'} (${seg.missingRows.map(r => esc(r.p.type)+' '+esc(r.p.label)).join('; ')}), så det går inte att säga exakt var i segmentet.`
+        : ' – båda ändpunkterna är skannade, så förseningen tillkom i detta direkta steg.';
+
+      if (Math.abs(addedMin) <= 15) {
+        html += `<li>🟢 ${fromTxt} → ${toTxt}: ingen ny försening tillkom (${formatDelta(addedMin)}). Förseningen propagerades bara vidare.</li>`;
+      } else if (addedMin > 15) {
+        html += `<li>🔴 ${fromTxt} → ${toTxt}: <strong>+${formatDelta(addedMin).replace('+','')} extra försening tillkom här</strong>${missingTxt}</li>`;
+      } else {
+        html += `<li>🟡 ${fromTxt} → ${toTxt}: tid återhämtades (${formatDelta(addedMin)})${missingTxt}</li>`;
+      }
+    });
+
+    // Specifik förklaring av propagation kontra ny försening, om både första försening och utkörning är skannade
+    const firstDelayedRow = rows.find(r => r.delayed);
+    const lastRow = scanned[scanned.length-1];
+    if (firstDelayedRow && lastRow && firstDelayedRow !== lastRow) {
+      const firstDelayMs = firstDelayedRow.actualMs - firstDelayedRow.plannedMs;
+      const lastDelayMs = lastRow.actualMs - lastRow.plannedMs;
+      const propagatedMin = Math.round(firstDelayMs / 60000);
+      const finalMin = Math.round(lastDelayMs / 60000);
+      const extraMin = finalMin - propagatedMin;
+      html += `<li style="margin-top:8px; list-style:none; border-top:1px solid var(--border); padding-top:8px;">
+        <strong>Totalt sett:</strong> Första kända försening var ${formatDelta(propagatedMin)} vid ${esc(firstDelayedRow.p.type)}. Vid sista skanningen (${esc(lastRow.p.type)}) är förseningen ${formatDelta(finalMin)}.
+        ${Math.abs(extraMin) <= 15
+          ? ' Inget tyder på ytterligare försening – den initiala förseningen propagerades bara.'
+          : extraMin > 15
+            ? ` Det är <strong>${formatDelta(extraMin)} mer</strong> än den initiala – ny försening har tillkommit längs vägen.`
+            : ` Det är <strong>${formatDelta(extraMin)} mindre</strong> – tid har återhämtats.`}
+      </li>`;
+    }
+
+    html += `</ul></div>`;
+  }
+
   out.innerHTML = html;
 
   out.querySelectorAll('[data-scan]').forEach(inp => inp.onchange = () => {
