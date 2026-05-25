@@ -714,88 +714,94 @@ function renderAnalyzeFor(id) {
   });
   html += `</div></div>`;
 
-  // ===== Förseningsanalys =====
-  if (scanned.length > 0) {
-    const delayItems = []; // {min, text} – samlas för "Kopiera alla"
+  // ===== Förseningsanalys per uppdrag =====
+  // Varje utförare bedöms självständigt på sin planerade tid mot faktisk tid.
+  // Förseningen "nollställs" mellan utförare.
+  const assignments = []; // {type, carrierId, scanKeys[], completionKey, departureKey?}
+  if (route.find(p => p.key === 'pickup')) {
+    assignments.push({ type:'Hämtning', carrierId: t.pickup.carrierId, scanKeys:['pickup'], completionKey:'pickup' });
+  }
+  t.legs.forEach((leg, i) => {
+    const line = state.lines.find(l => l.id === leg.lineId);
+    if (!line || !leg.date) return;
+    assignments.push({
+      type: `Linje ${line.name}`,
+      carrierId: line.carrierId,
+      scanKeys: [`leg-${i}-dep`, `leg-${i}-arr`],
+      completionKey: `leg-${i}-arr`,
+      departureKey: `leg-${i}-dep`,
+    });
+  });
+  if (route.find(p => p.key === 'delivery')) {
+    assignments.push({ type:'Utkörning', carrierId: t.delivery.carrierId, scanKeys:['delivery'], completionKey:'delivery' });
+  }
+
+  const rowByKey = Object.fromEntries(rows.map(r => [r.p.key, r]));
+  const results = assignments.map(a => {
+    const comp = rowByKey[a.completionKey];
+    const dep = a.departureKey ? rowByKey[a.departureKey] : null;
+    let delayMin = null;
+    if (comp && comp.actualMs != null) {
+      delayMin = Math.max(0, Math.round((comp.actualMs - comp.plannedMs) / 60000));
+    }
+    let depDelayMin = null;
+    if (dep && dep.actualMs != null) {
+      depDelayMin = Math.max(0, Math.round((dep.actualMs - dep.plannedMs) / 60000));
+    }
+    return { a, comp, dep, delayMin, depDelayMin };
+  });
+
+  const hasAnyScan = results.some(r => r.delayMin != null || r.depDelayMin != null);
+  if (hasAnyScan) {
+    const delayItems = []; // {min, text} – för "Kopiera alla"
     html += `<div class="card"><h3>Förseningsanalys <span id="copyAllSlot"></span></h3>`;
-    html += `<p class="muted">Visar var ny försening tillkommit. Inkrementell försening = skillnaden mellan total försening vid två på varandra följande skanningspunkter. Oskannade punkter mellan dem kan dölja var i segmentet det skedde.</p>`;
+    html += `<p class="muted">Varje utförare bedöms på sin egen planerade tid mot faktisk tid. Föregående utförares försening påverkar inte bedömningen – om en utförare hämtar upp tiden räknas det till deras fördel.</p>`;
     html += `<ul style="line-height:1.7">`;
 
-    segments.forEach(seg => {
-      const fromTxt = seg.fromRow
-        ? `<strong>${esc(seg.fromRow.p.type)}</strong> (${esc(seg.fromRow.p.label)})`
-        : `<strong>Start</strong>`;
-      const toTxt = seg.toRow
-        ? `<strong>${esc(seg.toRow.p.type)}</strong> (${esc(seg.toRow.p.label)})`
-        : `<strong>efter sista skanning</strong>`;
+    results.forEach(r => {
+      const carrier = carrierName(r.a.carrierId) || '(ingen utförare angiven)';
+      const head = `<strong>${esc(r.a.type)}</strong> – ${esc(carrier)}`;
 
-      if (seg.addedMs == null) {
-        // Oskannad svans
-        html += `<li>⚪ Mellan ${fromTxt} och slutet finns ${seg.missingRows.length} oskannad${seg.missingRows.length===1?'':'e'} punkt${seg.missingRows.length===1?'':'er'} – ingen information om vad som skett där.</li>`;
+      if (r.delayMin == null) {
+        const missing = [];
+        if (r.dep && r.dep.actualMs == null) missing.push('avgång');
+        if (!r.comp || r.comp.actualMs == null) missing.push(r.a.type === 'Hämtning' ? 'hämtning' : r.a.type === 'Utkörning' ? 'utkörning' : 'ankomst');
+        html += `<li>⚪ ${head}: <span class="muted">kan inte bedömas (saknar skann för ${missing.join(' och ')})</span></li>`;
         return;
       }
 
-      const addedMin = Math.round(seg.addedMs / 60000);
-      const missingTxt = seg.missingRows.length > 0
-        ? ` – passerar ${seg.missingRows.length} oskannad${seg.missingRows.length===1?' punkt':'a punkter'} (${seg.missingRows.map(r => esc(r.p.type)+' '+esc(r.p.label)).join('; ')}), så det går inte att säga exakt var i segmentet.`
-        : ' – båda ändpunkterna är skannade, så förseningen tillkom i detta direkta steg.';
+      const plannedTxt = fmtPlanned(r.comp.p);
+      const actualTxt = fmtActual(r.comp);
+      const compLabel = r.a.type === 'Hämtning' ? 'Hämtning' :
+                       r.a.type === 'Utkörning' ? 'Utkörning' :
+                       `Ankomst ${r.comp.p.label.replace(/^Ankomst /,'')}`;
 
-      if (Math.abs(addedMin) <= 15) {
-        html += `<li>🟢 ${fromTxt} → ${toTxt}: ingen ny försening tillkom (${formatDelta(addedMin)}). Förseningen propagerades bara vidare.</li>`;
-      } else if (addedMin > 15) {
-        const human = formatDaysHoursMin(addedMin);
-        const allCarriers = [...new Set([
-          seg.fromRow ? carrierName(seg.fromRow.p.carrierId) : '',
-          ...seg.missingRows.map(r => carrierName(r.p.carrierId)),
-          carrierName(seg.toRow.p.carrierId),
-        ].filter(Boolean))];
-        let where;
-        if (seg.missingRows.length === 0) {
-          where = seg.fromRow
-            ? `Försening uppstod mellan ${seg.fromRow.p.type} (${seg.fromRow.p.label}) och ${seg.toRow.p.type} (${seg.toRow.p.label})`
-            : `Försening uppstod vid ${seg.toRow.p.type} – ${seg.toRow.p.label}`;
-        } else if (seg.fromRow) {
-          where = `Försening uppstod någonstans mellan ${seg.fromRow.p.type} (${seg.fromRow.p.label}) och ${seg.toRow.p.type} (${seg.toRow.p.label})`;
+      // För linjer: visa även avgångsinfo
+      let depInfo = '';
+      if (r.dep) {
+        if (r.dep.actualMs == null) {
+          depInfo = ` <span class="muted">(avgång ej skannad)</span>`;
         } else {
-          where = `Försening uppstod före ${seg.toRow.p.type} (${seg.toRow.p.label})`;
+          const depPlanned = fmtPlanned(r.dep.p);
+          const depActual = fmtActual(r.dep);
+          depInfo = ` <span class="muted">Avgång: planerad ${depPlanned}, faktisk ${depActual}${r.depDelayMin > 15 ? ` (+${formatDaysHoursMin(r.depDelayMin)})` : ''}.</span>`;
         }
-        const ansvar = allCarriers.length ? `Ansvarig${allCarriers.length>1?'a':''} utförare: ${allCarriers.join(', ')}` : '';
-        const tider = `Planerad: ${fmtPlanned(seg.toRow.p)} – Faktisk: ${fmtActual(seg.toRow)}`;
-        const copyTxt = [human, where, tider, ansvar].filter(Boolean).join(' – ');
-        delayItems.push({ min: addedMin, text: copyTxt });
-        html += `<li>🔴 ${fromTxt} → ${toTxt}: <strong>+${formatDelta(addedMin).replace('+','')} extra försening tillkom här</strong> <button class="secondary copy-btn" data-copy="${esc(copyTxt)}" style="width:auto; padding:2px 8px; font-size:12px; margin-left:6px;">📋 ${esc(human)}</button>${missingTxt}</li>`;
+      }
+
+      if (r.delayMin <= 15) {
+        html += `<li>🟢 ${head}: <strong>i tid</strong> – planerad ${esc(plannedTxt)}, faktisk ${esc(actualTxt)}.${depInfo}</li>`;
       } else {
-        html += `<li>🟡 ${fromTxt} → ${toTxt}: tid återhämtades (${formatDelta(addedMin)})${missingTxt}</li>`;
+        const human = formatDaysHoursMin(r.delayMin);
+        const copyTxt = [
+          human,
+          `${r.a.type} – Ansvarig utförare: ${carrier}`,
+          `Planerad ${compLabel.toLowerCase()}: ${plannedTxt}`,
+          `Faktisk ${compLabel.toLowerCase()}: ${actualTxt}`,
+        ].join(' – ');
+        delayItems.push({ min: r.delayMin, text: copyTxt });
+        html += `<li>🔴 ${head}: <strong>försenad ${esc(human)}</strong> – planerad ${esc(plannedTxt)}, faktisk ${esc(actualTxt)} <button class="secondary copy-btn" data-copy="${esc(copyTxt)}" style="width:auto; padding:2px 8px; font-size:12px; margin-left:6px;">📋 ${esc(human)}</button>${depInfo}</li>`;
       }
     });
-
-    // Specifik förklaring av propagation kontra ny försening, om både första försening och utkörning är skannade
-    const firstDelayedRow = rows.find(r => r.delayed);
-    const lastRow = scanned[scanned.length-1];
-    if (firstDelayedRow && lastRow && firstDelayedRow !== lastRow) {
-      const firstDelayMs = firstDelayedRow.actualMs - firstDelayedRow.plannedMs;
-      const lastDelayMs = lastRow.actualMs - lastRow.plannedMs;
-      const propagatedMin = Math.round(firstDelayMs / 60000);
-      const finalMin = Math.round(lastDelayMs / 60000);
-      const extraMin = finalMin - propagatedMin;
-      const finalHuman = formatDaysHoursMin(finalMin);
-      const lastCarrier = carrierName(lastRow.p.carrierId);
-      const finalCopyTxt = [
-        finalHuman,
-        `Total försening vid ${lastRow.p.type} (${lastRow.p.label})`,
-        `Planerad: ${fmtPlanned(lastRow.p)} – Faktisk: ${fmtActual(lastRow)}`,
-        lastCarrier ? `Ansvarig utförare för sista steget: ${lastCarrier}` : ''
-      ].filter(Boolean).join(' – ');
-      const copyBtn = finalMin > 15 ? ` <button class="secondary copy-btn" data-copy="${esc(finalCopyTxt)}" style="width:auto; padding:2px 8px; font-size:12px; margin-left:6px;">📋 ${esc(finalHuman)}</button>` : '';
-      html += `<li style="margin-top:8px; list-style:none; border-top:1px solid var(--border); padding-top:8px;">
-        <strong>Totalt sett:</strong> Första kända försening var ${formatDelta(propagatedMin)} vid ${esc(firstDelayedRow.p.type)}. Vid sista skanningen (${esc(lastRow.p.type)}) är förseningen ${formatDelta(finalMin)}.${copyBtn}
-        ${Math.abs(extraMin) <= 15
-          ? ' Inget tyder på ytterligare försening – den initiala förseningen propagerades bara.'
-          : extraMin > 15
-            ? ` Det är <strong>${formatDelta(extraMin)} mer</strong> än den initiala – ny försening har tillkommit längs vägen.`
-            : ` Det är <strong>${formatDelta(extraMin)} mindre</strong> – tid har återhämtats.`}
-      </li>`;
-    }
 
     html += `</ul></div>`;
 
