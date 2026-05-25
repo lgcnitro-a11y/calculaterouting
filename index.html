@@ -627,11 +627,11 @@ function renderAnalyzeFor(id) {
       }
     } else {
       const [y,m,d] = p.plannedDate.split('-').map(Number);
-      plannedMs = new Date(y, m-1, d).getTime();
+      plannedMs = new Date(y, m-1, d, 12, 0).getTime();
       if (s.actual) {
-        const actual = new Date(s.actual + 'T00:00');
-        actualMs = actual.getTime();
-        deltaDays = Math.round((actual - new Date(y, m-1, d)) / 86400000);
+        const [ay,am,ad] = s.actual.split('-').map(Number);
+        actualMs = new Date(ay, am-1, ad, 12, 0).getTime();
+        deltaDays = Math.round((actualMs - plannedMs) / 86400000);
         delayed = deltaDays > 0;
       }
     }
