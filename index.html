@@ -651,10 +651,10 @@ function renderAnalyzeFor(id) {
         const added = thisDelay - prevDelay;
         const between = rows.slice(rows.indexOf(prev)+1, rows.indexOf(r)).filter(x => x.actualMs == null);
         segments.push({ fromRow: prev, toRow: r, addedMs: added, missingRows: between });
-      } else if (rows.indexOf(r) > 0) {
+      } else {
         const thisDelay = Math.max(0, r.actualMs - r.plannedMs);
         const before = rows.slice(0, rows.indexOf(r)).filter(x => x.actualMs == null);
-        if (before.length > 0 || thisDelay > 0) {
+        if (thisDelay > 0 || before.length > 0) {
           segments.push({ fromRow: null, toRow: r, addedMs: thisDelay, missingRows: before });
         }
       }
