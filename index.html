@@ -758,7 +758,8 @@ function renderAnalyzeFor(id) {
           where = `Försening uppstod före ${seg.toRow.p.type} (${seg.toRow.p.label})`;
           ansvar = toCarrier ? `Ansvarig utförare: ${toCarrier}` : '';
         }
-        const copyTxt = [human, where, ansvar].filter(Boolean).join(' – ');
+        const tider = `Planerad: ${fmtPlanned(seg.toRow.p)} – Faktisk: ${fmtActual(seg.toRow)}`;
+        const copyTxt = [human, where, tider, ansvar].filter(Boolean).join(' – ');
         delayItems.push({ min: addedMin, text: copyTxt });
         html += `<li>🔴 ${fromTxt} → ${toTxt}: <strong>+${formatDelta(addedMin).replace('+','')} extra försening tillkom här</strong> <button class="secondary copy-btn" data-copy="${esc(copyTxt)}" style="width:auto; padding:2px 8px; font-size:12px; margin-left:6px;">📋 ${esc(human)}</button>${missingTxt}</li>`;
       } else {
@@ -780,6 +781,7 @@ function renderAnalyzeFor(id) {
       const finalCopyTxt = [
         finalHuman,
         `Total försening vid ${lastRow.p.type} (${lastRow.p.label})`,
+        `Planerad: ${fmtPlanned(lastRow.p)} – Faktisk: ${fmtActual(lastRow)}`,
         lastCarrier ? `Ansvarig utförare för sista steget: ${lastCarrier}` : ''
       ].filter(Boolean).join(' – ');
       const copyBtn = finalMin > 15 ? ` <button class="secondary copy-btn" data-copy="${esc(finalCopyTxt)}" style="width:auto; padding:2px 8px; font-size:12px; margin-left:6px;">📋 ${esc(finalHuman)}</button>` : '';
@@ -845,6 +847,17 @@ function formatDelta(min) {
   if (a < 60) return `${sign}${a} min`;
   const h = Math.floor(a/60), m = a%60;
   return `${sign}${h}h ${m}min`;
+}
+function fmtPlanned(p) {
+  if (p.mode === 'time') return fmtDateTime(p.planned);
+  return p.plannedDate;
+}
+function fmtActual(row) {
+  if (row.actualMs == null) return '';
+  if (row.p.mode === 'time') return fmtDateTime(new Date(row.actualMs));
+  const d = new Date(row.actualMs);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 function formatDaysHoursMin(min) {
   const sign = min < 0 ? '-' : '';
