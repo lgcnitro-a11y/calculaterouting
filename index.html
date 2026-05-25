@@ -716,7 +716,8 @@ function renderAnalyzeFor(id) {
 
   // ===== Förseningsanalys =====
   if (scanned.length > 0) {
-    html += `<div class="card"><h3>Förseningsanalys</h3>`;
+    const delayItems = []; // {min, text} – samlas för "Kopiera alla"
+    html += `<div class="card"><h3>Förseningsanalys <span id="copyAllSlot"></span></h3>`;
     html += `<p class="muted">Visar var ny försening tillkommit. Inkrementell försening = skillnaden mellan total försening vid två på varandra följande skanningspunkter. Oskannade punkter mellan dem kan dölja var i segmentet det skedde.</p>`;
     html += `<ul style="line-height:1.7">`;
 
@@ -758,6 +759,7 @@ function renderAnalyzeFor(id) {
           ansvar = toCarrier ? `Ansvarig utförare: ${toCarrier}` : '';
         }
         const copyTxt = [human, where, ansvar].filter(Boolean).join(' – ');
+        delayItems.push({ min: addedMin, text: copyTxt });
         html += `<li>🔴 ${fromTxt} → ${toTxt}: <strong>+${formatDelta(addedMin).replace('+','')} extra försening tillkom här</strong> <button class="secondary copy-btn" data-copy="${esc(copyTxt)}" style="width:auto; padding:2px 8px; font-size:12px; margin-left:6px;">📋 ${esc(human)}</button>${missingTxt}</li>`;
       } else {
         html += `<li>🟡 ${fromTxt} → ${toTxt}: tid återhämtades (${formatDelta(addedMin)})${missingTxt}</li>`;
@@ -792,6 +794,14 @@ function renderAnalyzeFor(id) {
     }
 
     html += `</ul></div>`;
+
+    // Bygg "kopiera alla" – sortera fallande
+    if (delayItems.length > 0) {
+      const sorted = [...delayItems].sort((a,b) => b.min - a.min);
+      const allText = sorted.map((it,i) => `${i+1}. ${it.text}`).join('\n');
+      const btn = ` <button class="secondary copy-btn" data-copy="${esc(allText)}" style="width:auto; padding:4px 10px; font-size:13px; margin-left:8px;">📋 Kopiera alla (${sorted.length})</button>`;
+      html = html.replace('<span id="copyAllSlot"></span>', btn);
+    }
   }
 
   out.innerHTML = html;
